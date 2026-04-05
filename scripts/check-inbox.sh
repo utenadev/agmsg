@@ -73,22 +73,8 @@ if [ -f "$MARKER" ]; then
     last=$(stat -c %Y "$MARKER")
   fi
   now=$(date +%s)
-  # Prefer the new delivery.turn.check_interval; fall back to legacy
-  # hook.check_interval for users who haven't migrated.
-  INTERVAL=$("$SCRIPT_DIR/config.sh" get delivery.turn.check_interval "")
-  [ -z "$INTERVAL" ] && INTERVAL=$("$SCRIPT_DIR/config.sh" get hook.check_interval 60)
-  case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=60 ;; esac
+  INTERVAL=$("$SCRIPT_DIR/config.sh" get hook.check_interval 60)
   if [ $(( now - last )) -lt "$INTERVAL" ]; then
-    case "$TYPE" in
-      codex|copilot)
-        cat <<'ENDJSON'
-{
-  "continue": true,
-  "systemMessage": "agmsg: check skipped (cooldown)"
-}
-ENDJSON
-        ;;
-    esac
     exit 0
   fi
 fi

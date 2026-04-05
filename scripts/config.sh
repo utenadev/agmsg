@@ -87,11 +87,7 @@ yaml_set() {
     # Check if section exists
     if ! grep -q "^${section}:" "$CONFIG_FILE" 2>/dev/null; then
       printf '\n%s:\n  %s: %s\n' "$section" "$field" "$value" >> "$CONFIG_FILE"
-    elif awk -v section="$section" -v field="$field" '
-      /^[^ #]/ { in_section = ($0 ~ "^" section ":") }
-      in_section && $0 ~ "^  " field ":" { found=1; exit }
-      END { exit !found }
-    ' "$CONFIG_FILE" 2>/dev/null; then
+    elif grep -q "^  ${field}:" "$CONFIG_FILE" 2>/dev/null; then
       # Update existing field under section
       awk -v section="$section" -v field="$field" -v value="$value" '
         /^[^ #]/ { in_section = ($0 ~ "^" section ":") }
@@ -129,19 +125,8 @@ yaml_set() {
 create_default_config() {
   cat > "$CONFIG_FILE" <<'YAML'
 # agmsg configuration
-# https://agmsg.cc/
-#
-# Mode (monitor | turn | both | off) is per-project — derived from each
-# project's .claude/settings.local.json by `delivery.sh status`. There is
-# no global "mode" key. Only machine-wide tuning lives here.
-
-delivery:
-  monitor:
-    # watch.sh SQLite poll interval, seconds
-    poll_interval: 5
-  turn:
-    # Stop hook cooldown, seconds. Legacy alias: hook.check_interval
-    check_interval: 60
+hook:
+  check_interval: 60
 YAML
 }
 

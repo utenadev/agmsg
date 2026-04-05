@@ -130,35 +130,9 @@ If argument starts with "actas" followed by an agent name (e.g. "actas alice"):
 6. Set the session's active FROM to `<name>` — use `<name>` in every `send.sh` call for the rest of this session.
 7. Tell the user: "Now acting as `<name>`. Sends use `<name>` as from; receive restricted to `<name>` only."
 
-If argument starts with "drop" followed by an agent name (e.g. "drop alice"):
-1. Parse the role name.
-2. Run `~/.agents/skills/__SKILL_NAME__/scripts/reset.sh "$(pwd)" claude-code <name> "$CLAUDE_CODE_SESSION_ID"` to remove only that role's registration for this project. If the role has no other registrations left, reset.sh also drops it from the team config. The 4th argument releases any actas exclusivity locks this session held on the role so peers can pick it up immediately (see #62).
-3. If the session's active FROM was `<name>`, clear that state. Then:
-   a. Run TaskList. Find any task whose description begins with "agmsg inbox stream".
-   b. **If a matching task is found**: TaskStop it.
-   c. **If no matching task is found**: skip TaskStop. Do NOT attempt TaskStop with a guessed or empty task_id.
-   d. Invoke a fresh Monitor with the default subscription (no `actas` name filter — receives every (team, agent) pair currently registered for this project that isn't held by another session):
-      - command: `~/.agents/skills/__SKILL_NAME__/scripts/watch.sh $CLAUDE_CODE_SESSION_ID "$(pwd)" claude-code`
-      - description: `agmsg inbox stream`
-      - persistent: true
-4. Tell the user: "Dropped role `<name>` from this project."
-
-If argument is "mode" (no further args):
-1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh status claude-code "$(pwd)"`
-2. Show the output to the user.
-
-If argument starts with "mode" followed by a mode name (e.g. "mode monitor"):
-1. Parse the mode (one of `monitor`, `turn`, `both`, `off`).
-2. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh set <mode> claude-code "$(pwd)"`
-3. Read the `AGMSG-DIRECTIVE` block in the command output and follow it (invoke Monitor or TaskStop as instructed).
-
-If argument is "hook on" (legacy alias):
-1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh set turn claude-code "$(pwd)"`
-2. Tell the user: "Delivery mode set to 'turn' (legacy hook on behavior). Consider using /__SKILL_NAME__ mode monitor for real-time push."
-
-If argument is "hook off" (legacy alias):
-1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh set off claude-code "$(pwd)"`
-2. Tell the user: "Delivery mode set to 'off'."
+If argument is "hook off":
+1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/hook.sh off claude-code "$(pwd)"`
+2. Tell the user: "Auto message checking disabled."
 
 If argument is "config":
 1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/config.sh show`
@@ -167,7 +141,3 @@ If argument is "config":
 If argument starts with "config set" (e.g. "config set hook.check_interval 30"):
 1. Parse key and value from the arguments.
 2. Run: `~/.agents/skills/__SKILL_NAME__/scripts/config.sh set <key> <value>`
-
-If argument is "reset":
-1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/reset.sh "$(pwd)" claude-code`
-2. Tell the user the result.
