@@ -85,28 +85,12 @@ mkdir -p "$SKILL_DIR/run"
 touch "$MARKER"
 
 # Check for unread messages and mark as read
-DB="$(agmsg_db_path)"
+DB="$SKILL_DIR/db/messages.db"
 if [ ! -f "$DB" ]; then exit 0; fi
 
 OUTPUT=""
 IFS=',' read -ra TEAM_LIST <<< "$TEAMS"
 for team in "${TEAM_LIST[@]}"; do
-  # Honor actas exclusivity locks. If (team, AGENT) is currently held by
-  # another live session, that session is the owner of that role's inbox —
-  # don't deliver here. Mirrors the per-pair filtering watch.sh does for
-  # CC sessions (#62), giving Stop-hook delivery (codex / claude-code
-  # turn-mode) the same "respect peer locks" guarantee.
-  #
-  # Note: AGENT comes from whoami.sh, which returns the first registered
-  # agent for (project, type). It is NOT the session's in-memory actas
-  # role. That asymmetry is the Codex caveat documented in README — if a
-  # Codex session actas'd into <name>, check-inbox is still polling
-  # whatever whoami chose first, not <name>.
-  state=$(actas_lock_state "$team" "$AGENT" "${SESSION_ID:-}")
-  case "$state" in
-    other:*) continue ;;
-  esac
-
   RESULT=$(sqlite3 "$DB" "
     SELECT from_agent || char(31) || replace(replace(body, char(10), '\n'), char(9), '\t') || char(31) || created_at
     FROM messages WHERE team='$team' AND to_agent='$AGENT' AND read_at IS NULL
