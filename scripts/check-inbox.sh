@@ -77,6 +77,7 @@ if [ -f "$MARKER" ]; then
   # Fallback to default if non-numeric
   case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=60 ;; esac
   if [ $(( now - last )) -lt "$INTERVAL" ]; then
+    [ "$TYPE" = "codex" ] && echo "agmsg: check skipped (cooldown)"
     exit 0
   fi
 fi
@@ -110,16 +111,7 @@ done
 
 # No new messages
 if [ -z "$OUTPUT" ]; then
-  case "$TYPE" in
-    codex|copilot)
-      cat <<'ENDJSON'
-{
-  "continue": true,
-  "systemMessage": "agmsg: no new messages"
-}
-ENDJSON
-      ;;
-  esac
+  [ "$TYPE" = "codex" ] && echo "agmsg: no new messages"
   exit 0
 fi
 
