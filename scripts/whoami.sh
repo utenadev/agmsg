@@ -79,13 +79,8 @@ if [ ! -d "$TEAMS_DIR" ]; then
   exit 0
 fi
 
-# Exact (project, type) matches come from the shared identities helper.
-# Format: each line "<team>\t<agent>".
-EXACT_MATCHES="$("$SCRIPT_DIR/identities.sh" "$PROJECT_PATH" "$AGENT_TYPE")"
-
-# Suggestions = any agents of this type registered elsewhere, plus the list
-# of all teams on disk. These still need a full scan since identities.sh is
-# scoped to the exact (project, type).
+# Scan all team configs
+EXACT_MATCHES=""
 SUGGESTED_MATCHES=""
 ALL_TEAMS=""
 
@@ -98,8 +93,29 @@ for config_file in "$TEAMS_DIR"/*/config.json; do
 
   while IFS='	' read -r agent_name; do
     [ -n "$agent_name" ] || continue
+    EXACT_MATCHES="${EXACT_MATCHES:+$EXACT_MATCHES
+}$agent_name	$TEAM_NAME"
+  done < <(sqlite3 -separator '	' :memory: ".param set :json '$CONFIG_ESCAPED'" "
+    WITH agents AS (
+      SELECT
+        key AS name,
+        CASE
+          WHEN json_type(json_extract(value, '\$.registrations')) = 'array' THEN json_extract(value, '\$.registrations')
+          ELSE json_array(json_object('type', json_extract(value, '\$.type'), 'project', json_extract(value, '\$.project')))
+        END AS registrations
+      FROM json_each(json_extract(:json, '\$.agents'))
+    )
+    SELECT DISTINCT name
+    FROM agents, json_each(agents.registrations) AS r
+    WHERE json_extract(r.value, '\$.project') = '$PROJECT_PATH'
+      AND json_extract(r.value, '\$.type') = '$AGENT_TYPE';
+  ")
+
+  # Find agents with same type registered elsewhere for suggestion purposes
+  while IFS='	' read -r agent_name; do
+    [ -n "$agent_name" ] || continue
     SUGGESTED_MATCHES="${SUGGESTED_MATCHES:+$SUGGESTED_MATCHES
-}$TEAM_NAME	$agent_name"
+}$agent_name	$TEAM_NAME"
   done < <(sqlite3 -separator '	' :memory: ".param set :json '$CONFIG_ESCAPED'" "
     WITH agents AS (
       SELECT
@@ -122,17 +138,18 @@ if [ -z "$EXACT_MATCHES" ] && [ -z "$SUGGESTED_MATCHES" ]; then
 fi
 
 if [ -z "$EXACT_MATCHES" ]; then
-  # SUGGESTED_MATCHES is "team\tagent" per line; preserve that order.
-  AGENT_NAMES=$(echo "$SUGGESTED_MATCHES" | cut -f2 | awk '!seen[$0]++' | paste -sd, -)
-  TEAM_NAMES=$(echo "$SUGGESTED_MATCHES" | cut -f1 | awk '!seen[$0]++' | paste -sd, -)
+  AGENT_NAMES=$(echo "$SUGGESTED_MATCHES" | cut -f1 | awk '!seen[$0]++' | paste -sd, -)
+  TEAM_NAMES=$(echo "$SUGGESTED_MATCHES" | cut -f2 | awk '!seen[$0]++' | paste -sd, -)
   echo "suggest=true agents=$AGENT_NAMES teams=$TEAM_NAMES type=$AGENT_TYPE project=$PROJECT_PATH available_teams=${ALL_TEAMS:-none}"
   exit 0
 fi
 
-# EXACT_MATCHES from identities.sh is "team\tagent" per line.
-TEAM_NAMES=$(echo "$EXACT_MATCHES" | cut -f1 | awk '!seen[$0]++' | paste -sd, -)
-AGENT_NAMES=$(echo "$EXACT_MATCHES" | cut -f2 | awk '!seen[$0]++' | paste -sd, -)
-AGENT_COUNT=$(echo "$EXACT_MATCHES" | cut -f2 | sort -u | wc -l | tr -d ' ')
+# Deduplicate agent names and team names
+AGENT_NAMES=$(echo "$EXACT_MATCHES" | cut -f1 | awk '!seen[$0]++' | paste -sd, -)
+TEAM_NAMES=$(echo "$EXACT_MATCHES" | cut -f2 | awk '!seen[$0]++' | paste -sd, -)
+
+# Count unique agent names
+AGENT_COUNT=$(echo "$EXACT_MATCHES" | cut -f1 | sort -u | wc -l | tr -d ' ')
 
 if [ "$AGENT_COUNT" -eq 1 ]; then
   echo "agent=$AGENT_NAMES teams=$TEAM_NAMES type=$AGENT_TYPE project=$PROJECT_PATH"
