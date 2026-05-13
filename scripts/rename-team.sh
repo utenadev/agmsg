@@ -17,9 +17,8 @@ if [ "$OLD_TEAM" = "$NEW_TEAM" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/lib/storage.sh"
 TEAMS_DIR="$SCRIPT_DIR/../teams"
-DB="$(agmsg_db_path)"
+DB="$SCRIPT_DIR/../db/messages.db"
 OLD_DIR="$TEAMS_DIR/$OLD_TEAM"
 NEW_DIR="$TEAMS_DIR/$NEW_TEAM"
 
@@ -51,9 +50,3 @@ if [ -f "$DB" ]; then
 fi
 
 echo "Renamed team $OLD_TEAM → $NEW_TEAM"
-echo
-echo "Note: existing members in other projects/sessions still see the old"
-echo "team name cached. Each member should re-run whoami in their project"
-echo "to pick up the new name:"
-echo
-echo "  ~/.agents/skills/<skill>/scripts/whoami.sh \"\$(pwd)\" <type>"
