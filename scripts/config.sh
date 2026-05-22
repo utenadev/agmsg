@@ -129,8 +129,19 @@ yaml_set() {
 create_default_config() {
   cat > "$CONFIG_FILE" <<'YAML'
 # agmsg configuration
-hook:
-  check_interval: 60
+# https://agmsg.cc/
+#
+# Mode (monitor | turn | both | off) is per-project — derived from each
+# project's .claude/settings.local.json by `delivery.sh status`. There is
+# no global "mode" key. Only machine-wide tuning lives here.
+
+delivery:
+  monitor:
+    # watch.sh SQLite poll interval, seconds
+    poll_interval: 5
+  turn:
+    # Stop hook cooldown, seconds. Legacy alias: hook.check_interval
+    check_interval: 60
 YAML
 }
 

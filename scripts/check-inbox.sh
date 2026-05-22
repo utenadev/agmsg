@@ -73,8 +73,10 @@ if [ -f "$MARKER" ]; then
     last=$(stat -c %Y "$MARKER")
   fi
   now=$(date +%s)
-  INTERVAL=$("$SCRIPT_DIR/config.sh" get hook.check_interval 60)
-  # Fallback to default if non-numeric
+  # Prefer the new delivery.turn.check_interval; fall back to legacy
+  # hook.check_interval for users who haven't migrated.
+  INTERVAL=$("$SCRIPT_DIR/config.sh" get delivery.turn.check_interval "")
+  [ -z "$INTERVAL" ] && INTERVAL=$("$SCRIPT_DIR/config.sh" get hook.check_interval 60)
   case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=60 ;; esac
   if [ $(( now - last )) -lt "$INTERVAL" ]; then
     [ "$TYPE" = "codex" ] && echo "agmsg: check skipped (cooldown)"

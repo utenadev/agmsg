@@ -61,14 +61,14 @@ print(len(d['hooks']['Stop']))
   run bash "$SCRIPTS/hook.sh" on codex "$TEST_PROJECT"
   [ "$status" -eq 0 ]
   [ -f "$TEST_PROJECT/.codex/hooks.json" ]
-  [[ "$output" =~ "Hook enabled" ]]
+  [[ "$output" =~ "Delivery mode set to 'turn'" ]]
 }
 
 @test "hook off: codex removes hook" {
   bash "$SCRIPTS/hook.sh" on codex "$TEST_PROJECT"
   run bash "$SCRIPTS/hook.sh" off codex "$TEST_PROJECT"
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "Hook disabled" ]]
+  [[ "$output" =~ "Delivery mode set to 'off'" ]]
 }
 
 # --- hook.sh off ---

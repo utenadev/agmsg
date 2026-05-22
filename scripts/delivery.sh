@@ -39,8 +39,6 @@ resolve_hooks_file() {
   case "$type" in
     claude-code) echo "$project/.claude/settings.local.json" ;;
     codex)       echo "$project/.codex/hooks.json" ;;
-    gemini|antigravity) echo "$project/.agent/rules/agmsg.md" ;;
-    copilot)     echo "$project/.github/hooks/agmsg.json" ;;
     *) echo "Unknown agent type: $type" >&2; return 1 ;;
   esac
 }
@@ -130,101 +128,10 @@ prune_empty_hooks() {
   "
 }
 
-apply_settings_copilot() {
-  local type="$1"
-  local project="$2"
-  local mode="$3"
-  local hooks_file
-  hooks_file=$(resolve_hooks_file "$type" "$project")
-
-  # Validate the mode BEFORE touching any existing file. Rejecting
-  # monitor/both must not destroy a working turn hook.
-  case "$mode" in
-    turn|off) ;;
-    monitor|both)
-      echo "Error: '$mode' mode is not supported for $type (no Monitor-tool equivalent). Use 'turn' or 'off'." >&2
-      return 1
-      ;;
-    *)
-      echo "Unknown mode: $mode (use turn|off)" >&2
-      return 1
-      ;;
-  esac
-
-  # Strip first so re-applying turn is an idempotent rewrite and turn->off
-  # cleanly removes the file.
-  rm -f "$hooks_file"
-
-  if [ "$mode" = "turn" ]; then
-    mkdir -p "$(dirname "$hooks_file")"
-    local cmd="'$SKILL_DIR/scripts/check-inbox.sh' '$type' '$project'"
-    # json_quote handles JSON-string escaping for arbitrary command strings
-    # (project paths may contain JSON-special chars).
-    local cmd_json
-    cmd_json=$(sqlite3 :memory: "SELECT json_quote('$(printf '%s' "$cmd" | sed "s/'/''/g")');")
-    # Use PascalCase 'Stop' trigger so the input payload field names match
-    # the snake_case form (session_id) that check-inbox.sh already parses.
-    cat <<EOF > "$hooks_file"
-{
-  "version": 1,
-  "hooks": {
-    "Stop": [
-      {
-        "type": "command",
-        "bash": $cmd_json,
-        "timeoutSec": 30
-      }
-    ]
-  }
-}
-EOF
-  fi
-}
-
-apply_settings_gemini() {
-  local type="$1"
-  local project="$2"
-  local mode="$3"
-  local rule_file
-  rule_file=$(resolve_hooks_file "$type" "$project")
-
-  # Remove existing rule file
-  rm -f "$rule_file"
-
-  case "$mode" in
-    turn|both)
-      mkdir -p "$(dirname "$rule_file")"
-      cat <<EOF > "$rule_file"
-# agmsg Integration Rule
-
-## PostToolUse
-After each tool call, automatically check the agmsg inbox for unread messages.
-- Command: '$SKILL_DIR/scripts/check-inbox.sh' '$type' '$project'
-EOF
-      ;;
-    monitor)
-      echo "Warning: 'monitor' mode is not fully supported for $type yet. Using turn-based hook." >&2
-      apply_settings_gemini "$type" "$project" "turn"
-      ;;
-    off)
-      ;;
-  esac
-}
-
 apply_settings() {
   local type="$1"
   local project="$2"
   local mode="$3"
-
-  if [ "$type" = "gemini" ] || [ "$type" = "antigravity" ]; then
-    apply_settings_gemini "$type" "$project" "$mode"
-    return
-  fi
-
-  if [ "$type" = "copilot" ]; then
-    apply_settings_copilot "$type" "$project" "$mode"
-    return
-  fi
 
   local hooks_file
   hooks_file=$(resolve_hooks_file "$type" "$project")
@@ -233,18 +140,15 @@ apply_settings() {
   local settings_esc
   settings_esc=$(read_settings_escaped "$hooks_file")
 
-  # 1) Strip any prior agmsg ownership from SessionStart, SessionEnd, Stop.
+  # 1) Strip any prior agmsg ownership from SessionStart and Stop.
   settings_esc=$(strip_agmsg_event "$settings_esc" "SessionStart" | sed "s/'/''/g")
-  settings_esc=$(strip_agmsg_event "$settings_esc" "SessionEnd"   | sed "s/'/''/g")
-  settings_esc=$(strip_agmsg_event "$settings_esc" "Stop"         | sed "s/'/''/g")
+  settings_esc=$(strip_agmsg_event "$settings_esc" "Stop" | sed "s/'/''/g")
 
   # 2) Re-add what this mode wants.
   case "$mode" in
     monitor)
-      local ss="'$SKILL_DIR/scripts/session-start.sh' '$type' '$project'"
-      local se="'$SKILL_DIR/scripts/session-end.sh'   '$type' '$project'"
-      settings_esc=$(add_event_entry "$settings_esc" "SessionStart" "$ss" | sed "s/'/''/g")
-      settings_esc=$(add_event_entry "$settings_esc" "SessionEnd"   "$se" | sed "s/'/''/g")
+      local cmd="'$SKILL_DIR/scripts/session-start.sh' '$type' '$project'"
+      settings_esc=$(add_event_entry "$settings_esc" "SessionStart" "$cmd" | sed "s/'/''/g")
       ;;
     turn)
       local cmd="'$SKILL_DIR/scripts/check-inbox.sh' '$type' '$project'"
@@ -252,11 +156,9 @@ apply_settings() {
       ;;
     both)
       local ss="'$SKILL_DIR/scripts/session-start.sh' '$type' '$project'"
-      local se="'$SKILL_DIR/scripts/session-end.sh'   '$type' '$project'"
-      local st="'$SKILL_DIR/scripts/check-inbox.sh'   '$type' '$project'"
+      local st="'$SKILL_DIR/scripts/check-inbox.sh' '$type' '$project'"
       settings_esc=$(add_event_entry "$settings_esc" "SessionStart" "$ss" | sed "s/'/''/g")
-      settings_esc=$(add_event_entry "$settings_esc" "SessionEnd"   "$se" | sed "s/'/''/g")
-      settings_esc=$(add_event_entry "$settings_esc" "Stop"         "$st" | sed "s/'/''/g")
+      settings_esc=$(add_event_entry "$settings_esc" "Stop" "$st" | sed "s/'/''/g")
       ;;
     off)
       : # already stripped
@@ -277,46 +179,16 @@ emit_monitor_directive() {
   local type="$1"
   local project="$2"
   local watch="$SKILL_DIR/scripts/watch.sh"
-
-  # Claude Code exports CLAUDE_CODE_SESSION_ID for every subprocess of the
-  # session. Bake it directly into the command so the agent never has to
-  # invent a value — that lets SessionEnd find and clean the matching
-  # pidfile reliably. Fall back to a generated id when the env var isn't
-  # present (older CC, non-CC runtimes).
-  local session_id="${CLAUDE_CODE_SESSION_ID:-}"
-  if [ -z "$session_id" ]; then
-    if command -v uuidgen >/dev/null 2>&1; then
-      session_id="agmsg-$(uuidgen | tr 'A-Z' 'a-z')"
-    else
-      session_id="agmsg-$(date +%s)-$$"
-    fi
-  fi
-
-  # Skip the directive when this CC session already has a live watcher —
-  # invoking Monitor again would just spawn a duplicate and orphan the
-  # previous watcher process.
-  local pidfile="$RUN_DIR/watch.$session_id.pid"
-  if [ -f "$pidfile" ]; then
-    local existing
-    existing=$(cat "$pidfile" 2>/dev/null || true)
-    if [ -n "$existing" ] && kill -0 "$existing" 2>/dev/null; then
-      cat <<EOF
-
-A watch.sh is already streaming into this session (pid $existing). No
-action needed — the existing watcher is the active one.
-EOF
-      return 0
-    fi
-  fi
-
   cat <<EOF
 
 AGMSG-DIRECTIVE: For this running session, invoke the Monitor tool now with:
-  command: $watch $session_id $project $type
+  command: $watch \$AGMSG_SESSION_ID $project $type
   description: agmsg inbox stream
   persistent: true
 
-Pass the command above verbatim — the session_id is already filled in.
+Substitute \$AGMSG_SESSION_ID with the current session_id when known
+(passed by the SessionStart hook in production; in interactive use, any
+unique string per session works — the pidfile uses it as a key).
 EOF
 }
 
@@ -340,6 +212,7 @@ do_set() {
   esac
 
   apply_settings "$TYPE" "$PROJECT" "$MODE"
+  "$SCRIPT_DIR/config.sh" set delivery.mode "$MODE" >/dev/null
 
   echo "Delivery mode set to '$MODE' for $PROJECT ($TYPE)"
 
@@ -366,45 +239,22 @@ do_status() {
   local TYPE="${1:-}"
   local PROJECT="${2:-}"
 
-  # Mode is derived from the project's settings.local.json — there's no
-  # global mode value. When called without <type> <project>, we can't infer
-  # a project-scoped mode, so we just skip the mode line and report the
-  # global watcher state below.
-  if [ -n "$TYPE" ] && [ -n "$PROJECT" ]; then
-    local hf
-    hf=$(resolve_hooks_file "$TYPE" "$PROJECT")
-    if [ "$TYPE" = "gemini" ] || [ "$TYPE" = "antigravity" ] || [ "$TYPE" = "copilot" ]; then
-      local mode="off"
-      if [ -f "$hf" ]; then
-        mode="turn"
-      fi
-      echo "mode: $mode"
+  local mode
+  mode=$("$SCRIPT_DIR/config.sh" get delivery.mode "" 2>/dev/null || true)
+  if [ -z "$mode" ]; then
+    # Legacy: if hook.check_interval exists from a prior hook.sh install,
+    # treat that as effective mode=turn for reporting.
+    local legacy
+    legacy=$("$SCRIPT_DIR/config.sh" get hook.check_interval "" 2>/dev/null || true)
+    if [ -n "$legacy" ]; then
+      mode="turn (legacy hook.check_interval=$legacy)"
     else
-      local has_ss=0 has_st=0
-      if [ -f "$hf" ]; then
-        has_ss=$(sqlite3 :memory: "
-          SELECT EXISTS(
-            SELECT 1 FROM json_each(json_extract(readfile('$hf'), '\$.hooks.SessionStart')) AS s,
-              json_each(json_extract(s.value, '\$.hooks')) AS h
-            WHERE instr(json_extract(h.value, '\$.command'), '$SKILL_NAME') > 0
-          );" 2>/dev/null || echo 0)
-        has_st=$(sqlite3 :memory: "
-          SELECT EXISTS(
-            SELECT 1 FROM json_each(json_extract(readfile('$hf'), '\$.hooks.Stop')) AS s,
-              json_each(json_extract(s.value, '\$.hooks')) AS h
-            WHERE instr(json_extract(h.value, '\$.command'), '$SKILL_NAME') > 0
-          );" 2>/dev/null || echo 0)
-      fi
-      local mode="off"
-      if [ "$has_ss" = "1" ] && [ "$has_st" = "1" ]; then mode="both"
-      elif [ "$has_ss" = "1" ]; then mode="monitor"
-      elif [ "$has_st" = "1" ]; then mode="turn"
-      fi
-      echo "mode: $mode"
+      mode="off (default)"
     fi
   fi
+  echo "mode: $mode"
 
-  if [ -n "$TYPE" ] && [ -n "$PROJECT" ] && [ "$TYPE" != "gemini" ] && [ "$TYPE" != "antigravity" ] && [ "$TYPE" != "copilot" ]; then
+  if [ -n "$TYPE" ] && [ -n "$PROJECT" ]; then
     local hooks_file
     hooks_file=$(resolve_hooks_file "$TYPE" "$PROJECT")
     if [ -f "$hooks_file" ]; then
@@ -413,9 +263,6 @@ do_status() {
       case "$count" in ''|*[!0-9]*) count=0 ;; esac
       echo "settings hooks file: $hooks_file"
       echo "  SessionStart entries: $count"
-      count=$(sqlite3 :memory: "SELECT json_array_length(json_extract('$(read_settings_escaped "$hooks_file")', '\$.hooks.SessionEnd'));" 2>/dev/null || echo 0)
-      case "$count" in ''|*[!0-9]*) count=0 ;; esac
-      echo "  SessionEnd entries:   $count"
       count=$(sqlite3 :memory: "SELECT json_array_length(json_extract('$(read_settings_escaped "$hooks_file")', '\$.hooks.Stop'));" 2>/dev/null || echo 0)
       case "$count" in ''|*[!0-9]*) count=0 ;; esac
       echo "  Stop entries:         $count"
@@ -443,18 +290,10 @@ kill_all_watchers() {
   if [ -d "$RUN_DIR" ]; then
     for f in "$RUN_DIR"/watch.*.pid; do
       [ -f "$f" ] || continue
-      local pid cmd
+      local pid
       pid=$(cat "$f" 2>/dev/null || echo "")
       if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        # Defensive: only kill if the pid's command line still looks like
-        # our watch.sh. Defends against pid recycling — a stale pidfile
-        # could point at an unrelated process that reused the pid.
-        cmd=$(ps -o args= -p "$pid" 2>/dev/null || true)
-        case "$cmd" in
-          *"$SKILL_DIR/scripts/watch.sh"*)
-            kill "$pid" 2>/dev/null && killed=$((killed + 1)) ;;
-          *) ;;  # not our watcher; leave it
-        esac
+        kill "$pid" 2>/dev/null && killed=$((killed + 1))
       fi
       rm -f "$f"
     done
