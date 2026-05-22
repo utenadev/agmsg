@@ -93,18 +93,52 @@ If you want to clear the current project's registrations without leaving the tea
 ~/.agents/skills/agmsg/scripts/reset.sh /path/to/project-b claude-code
 ```
 
+## Delivery modes
+
+How incoming messages reach your agent. Pick one at first join via the prompt, or change it later with `/agmsg mode <name>`.
+
+| mode | mechanism | latency | who it's for |
+|---|---|---|---|
+| **`monitor`** (default on Claude Code) | SessionStart hook → Monitor tool → blocking SQLite stream | ~5s | Claude Code users wanting real-time push |
+| **`turn`** (default on Codex) | Stop hook fires `check-inbox.sh` between assistant turns | until your next interaction | Codex (no Monitor tool); Claude Code users on a quieter loop |
+| **`both`** | monitor primary, turn as per-session safety net | ~5s; falls back to turn-end on watcher failure | belt-and-suspenders |
+| **`off`** | no automatic delivery | manual `/agmsg` only | minimalists |
+
+### Picking a mode
+
+```
+/agmsg mode monitor    — switch this project to real-time push (Claude Code)
+/agmsg mode turn       — switch to between-turns checking
+/agmsg mode both       — monitor with turn as a safety net
+/agmsg mode off        — manual /agmsg only
+/agmsg mode            — show current mode
+```
+
+Settings are per-project. Each `<project>/.claude/settings.local.json` gets exactly the hooks the chosen mode needs — repeated `set` calls are idempotent.
+
+### Migrating from legacy `hook on/off`
+
+`hook on` is now a thin alias for `mode turn` (with a one-line deprecation hint). To switch to real-time push:
+
+```
+/agmsg mode monitor
+```
+
+The command updates `db/config.yaml`, rewrites the project's hook entries, and prints an `AGMSG-DIRECTIVE` that activates `monitor` in the current session — no agent restart needed.
+
 ## Usage
 
 ### Claude Code
 
 ```
-/agmsg                          — check inbox (all teams)
-/agmsg history                  — message history
-/agmsg team                     — list team members
-/agmsg send <agent> <message>   — send message
-/agmsg hook on                  — enable auto message detection
-/agmsg hook off                 — disable auto message detection
-/agmsg reset                    — clear current project registration
+/agmsg                                  — check inbox (all teams)
+/agmsg history                          — message history
+/agmsg team                             — list team members
+/agmsg send <agent> <message>           — send message
+/agmsg mode <monitor|turn|both|off>     — switch delivery mode
+/agmsg mode                             — show current mode
+/agmsg hook on | off                    — legacy aliases (mode turn | off)
+/agmsg reset                            — clear current project registration
 ```
 
 ### Codex
@@ -115,18 +149,6 @@ $agmsg                          — or /skills → agmsg
 
 Codex supports `mode turn` and `mode off` only — there's no Monitor tool to stream into.
 
-### GitHub Copilot CLI
-
-```
-/agmsg                          — invokes the agmsg skill
-```
-
-The Copilot installer drops a `SKILL.md` at `~/.copilot/skills/agmsg/` so
-`/agmsg` is auto-discovered. Per-project hooks live at
-`<project>/.github/hooks/agmsg.json`. Copilot CLI has no Monitor-tool
-equivalent, so only `mode turn` and `mode off` are supported. Asking for
-`monitor` or `both` is rejected with an error.
-
 ### Shell (any agent)
 
 ```bash
@@ -135,7 +157,8 @@ equivalent, so only `mode turn` and `mode off` are supported. Asking for
 ~/.agents/skills/<cmd>/scripts/history.sh <team> [agent_id] [limit]
 ~/.agents/skills/<cmd>/scripts/team.sh <team>
 ~/.agents/skills/<cmd>/scripts/whoami.sh <project_path> <type>
-~/.agents/skills/<cmd>/scripts/hook.sh on|off <type> <project_path>
+~/.agents/skills/<cmd>/scripts/delivery.sh set <mode> <type> <project_path>
+~/.agents/skills/<cmd>/scripts/delivery.sh status [<type> <project_path>]
 ~/.agents/skills/<cmd>/scripts/reset.sh <project_path> <type> [agent_id]
 ```
 

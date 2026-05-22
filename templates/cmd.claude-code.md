@@ -40,8 +40,6 @@ Four possible outputs:
   > - `/__SKILL_NAME__ team` — list team members
   > - `/__SKILL_NAME__ history` — message history
   > - `/__SKILL_NAME__ mode <monitor|turn|both|off>` — switch delivery mode
-  > - `/__SKILL_NAME__ actas <name>` — switch to another role in this project (creates if needed)
-  > - `/__SKILL_NAME__ drop <name>` — remove a role from this project
 
   5. **REQUIRED — Do NOT skip this step.** Ask the user to pick a delivery mode using exactly this prompt:
 
@@ -110,29 +108,22 @@ If argument starts with "send" (e.g. "send misaki check the server"):
 2. Determine which team the target agent belongs to, then run:
    `~/.agents/skills/__SKILL_NAME__/scripts/send.sh $TEAM $AGENT <to_agent> "<message>"`
 
-If argument starts with "actas" followed by an agent name (e.g. "actas alice"):
-1. Parse the new role name.
-2. Run `~/.agents/skills/__SKILL_NAME__/scripts/identities.sh "$(pwd)" claude-code` to see whether the role is already registered for this (project, type).
-3. If the name does not appear in the output, join under the existing team. Read TEAMS from the in-session whoami state (it may be a single team or comma-separated). For a single team, run `~/.agents/skills/__SKILL_NAME__/scripts/join.sh <team> <name> claude-code "$(pwd)"`. For multiple teams, ask the user which team to join the new role into, then run join.sh for that team.
-4. **Pre-flight claim** the actas exclusivity lock so this role isn't already owned by another live session: `~/.agents/skills/__SKILL_NAME__/scripts/actas-claim.sh "$(pwd)" claude-code <name> "$CLAUDE_CODE_SESSION_ID"`. Read the `status=` line of the output:
-    - `status=ok ...`: proceed to step 5.
-    - `status=held team=<team> owner=<sid>`: another live session currently owns `<name>` in `<team>`. Tell the user: "Cannot actas as `<name>` — it is held by session `<sid>` in team `<team>`. Run `/__SKILL_NAME__ drop <name>` in that session first, then retry." Then abort — do NOT touch the running Monitor.
-    - `status=not_registered`: shouldn't happen if step 3 ran; treat as an error.
-5. **Switch receive too — exclusive role mode.**
-   a. Run TaskList. Find any task whose description begins with "agmsg inbox stream".
-   b. **If a matching task is found**: TaskStop it.
-   c. **If no matching task is found** (typical when /__SKILL_NAME__ actas runs as the first command of a fresh session — SessionStart hasn't fired the Monitor directive yet, or you're invoking actas before the agent acted on it): skip TaskStop entirely. There is no Monitor to stop. Do NOT attempt TaskStop with a guessed or empty task_id — it will fail with "Invalid tool parameters" and confuse the flow.
-   d. Invoke a fresh Monitor regardless of whether step b or c applied:
-      - command: `~/.agents/skills/__SKILL_NAME__/scripts/watch.sh $CLAUDE_CODE_SESSION_ID "$(pwd)" claude-code <name>`
-      - description: `agmsg inbox stream (acting as <name>)`
-      - persistent: true
-   The 4th argument to `watch.sh` restricts the subscription to messages addressed to `<name>` only — other roles' inbound messages stop reaching this session until another `actas` or session end.
-6. Set the session's active FROM to `<name>` — use `<name>` in every `send.sh` call for the rest of this session.
-7. Tell the user: "Now acting as `<name>`. Sends use `<name>` as from; receive restricted to `<name>` only."
+If argument is "mode" (no further args):
+1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh status claude-code "$(pwd)"`
+2. Show the output to the user.
 
-If argument is "hook off":
-1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/hook.sh off claude-code "$(pwd)"`
-2. Tell the user: "Auto message checking disabled."
+If argument starts with "mode" followed by a mode name (e.g. "mode monitor"):
+1. Parse the mode (one of `monitor`, `turn`, `both`, `off`).
+2. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh set <mode> claude-code "$(pwd)"`
+3. Read the `AGMSG-DIRECTIVE` block in the command output and follow it (invoke Monitor or TaskStop as instructed).
+
+If argument is "hook on" (legacy alias):
+1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh set turn claude-code "$(pwd)"`
+2. Tell the user: "Delivery mode set to 'turn' (legacy hook on behavior). Consider using /__SKILL_NAME__ mode monitor for real-time push."
+
+If argument is "hook off" (legacy alias):
+1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh set off claude-code "$(pwd)"`
+2. Tell the user: "Delivery mode set to 'off'."
 
 If argument is "config":
 1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/config.sh show`
