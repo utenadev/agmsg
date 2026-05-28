@@ -40,6 +40,8 @@ Four possible outputs:
   > - `/__SKILL_NAME__ team` — list team members
   > - `/__SKILL_NAME__ history` — message history
   > - `/__SKILL_NAME__ mode <monitor|turn|both|off>` — switch delivery mode
+  > - `/__SKILL_NAME__ actas <name>` — switch to another role in this project (creates if needed)
+  > - `/__SKILL_NAME__ drop <name>` — remove a role from this project
 
   5. **REQUIRED — Do NOT skip this step.** Ask the user to pick a delivery mode using exactly this prompt:
 
@@ -107,6 +109,27 @@ If argument starts with "send" (e.g. "send misaki check the server"):
 1. Parse target agent and message from the arguments
 2. Determine which team the target agent belongs to, then run:
    `~/.agents/skills/__SKILL_NAME__/scripts/send.sh $TEAM $AGENT <to_agent> "<message>"`
+
+If argument starts with "actas" followed by an agent name (e.g. "actas alice"):
+1. Parse the new role name.
+2. Run `~/.agents/skills/__SKILL_NAME__/scripts/identities.sh "$(pwd)" claude-code` to see whether the role is already registered for this (project, type).
+3. If the name does not appear in the output, join under the existing team. Read TEAMS from the in-session whoami state (it may be a single team or comma-separated). For a single team, run `~/.agents/skills/__SKILL_NAME__/scripts/join.sh <team> <name> claude-code "$(pwd)"`. For multiple teams, ask the user which team to join the new role into, then run join.sh for that team.
+4. **Switch receive too — exclusive role mode.** Find the running agmsg Monitor task with TaskList (description begins with "agmsg inbox stream") and TaskStop it. Then invoke a fresh Monitor:
+    - command: `~/.agents/skills/__SKILL_NAME__/scripts/watch.sh $CLAUDE_CODE_SESSION_ID "$(pwd)" claude-code <name>`
+    - description: `agmsg inbox stream (acting as <name>)`
+    - persistent: true
+   The 4th argument to `watch.sh` restricts the subscription to messages addressed to `<name>` only — other roles' inbound messages stop reaching this session until another `actas` or session end.
+5. Set the session's active FROM to `<name>` — use `<name>` in every `send.sh` call for the rest of this session.
+6. Tell the user: "Now acting as `<name>`. Sends use `<name>` as from; receive restricted to `<name>` only."
+
+If argument starts with "drop" followed by an agent name (e.g. "drop alice"):
+1. Parse the role name.
+2. Run `~/.agents/skills/__SKILL_NAME__/scripts/reset.sh "$(pwd)" claude-code <name>` to remove only that role's registration for this project. If the role has no other registrations left, reset.sh also drops it from the team config.
+3. If the session's active FROM was `<name>`, clear that state. Then TaskStop the existing agmsg Monitor task and invoke a fresh Monitor with the default (all-roles) subscription:
+    - command: `~/.agents/skills/__SKILL_NAME__/scripts/watch.sh $CLAUDE_CODE_SESSION_ID "$(pwd)" claude-code`
+    - description: `agmsg inbox stream`
+    - persistent: true
+4. Tell the user: "Dropped role `<name>` from this project."
 
 If argument is "mode" (no further args):
 1. Run: `~/.agents/skills/__SKILL_NAME__/scripts/delivery.sh status claude-code "$(pwd)"`
