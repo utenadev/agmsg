@@ -39,6 +39,8 @@ resolve_hooks_file() {
   case "$type" in
     claude-code) echo "$project/.claude/settings.local.json" ;;
     codex)       echo "$project/.codex/hooks.json" ;;
+    gemini|antigravity|opencode) echo "$project/.agent/rules/agmsg.md" ;;
+    copilot)     echo "$project/.github/hooks/agmsg.json" ;;
     *) echo "Unknown agent type: $type" >&2; return 1 ;;
   esac
 }
@@ -393,4 +395,6 @@ case "$ACTION" in
   stop)    do_stop "$@" ;;
   restart) do_restart "$@" ;;
   *)       echo "Unknown action: $ACTION (use set|status|stop|restart)" >&2; exit 1 ;;
+esac
+&2; exit 1 ;;
 esac
