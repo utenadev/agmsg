@@ -396,5 +396,3 @@ case "$ACTION" in
   restart) do_restart "$@" ;;
   *)       echo "Unknown action: $ACTION (use set|status|stop|restart)" >&2; exit 1 ;;
 esac
-&2; exit 1 ;;
-esac
